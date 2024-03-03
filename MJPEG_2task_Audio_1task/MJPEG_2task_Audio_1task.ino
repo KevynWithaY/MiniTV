@@ -5,41 +5,121 @@
  * JPEGDEC: https://github.com/bitbank2/JPEGDEC.git
  */
 
-// auto fall back to MP3 if AAC file not available
+#include <WiFi.h>
+#include <FS.h>
+
+//#include <FFat.h>
+//#include <LittleFS.h>
+#include <SD.h>
+#include <SPI.h>
+//#include <SD_MMC.h>
+//#include <SPIFFS.h>
+
+/* audio */
+#include "esp32_audio_task.h"
+
+/* MJPEG Video */
+#include "mjpeg_decode_draw_task.h"
+
+
+// Filenames
+// (auto fall back to MP3 if AAC file not available)
 #define AAC_FILENAME "/44100.aac"
 #define MP3_FILENAME "/44100.mp3"
-#define MJPEG_FILENAME "/288_30fps.mjpeg"
+//#define MJPEG_FILENAME "/128_30fps.mjpeg" 
+#define MJPEG_FILENAME "/320_24fps.mjpeg"
+//#define MJPEG_FILENAME "/280_24fps.mjpeg"
+//#define MJPEG_FILENAME "/320_30fps.mjpeg"
+//#define MJPEG_FILENAME "/288_30fps.mjpeg"
 // #define MJPEG_FILENAME "/320_30fps.mjpeg"
-#define FPS 30
-#define MJPEG_BUFFER_SIZE (288 * 240 * 2 / 8)
-// #define MJPEG_BUFFER_SIZE (320 * 240 * 2 / 8)
+
+// Frames per second
+#define FPS 24 //30
+
+// Video size
+#define VID_WIDTH 320 //288 // 128
+#define VID_HEIGHT 240 // 240 // 128
+
+#define TFT_WIDTH 320
+#define TFT_HEIGHT 240
+
+// Buffer size (based on video size) [width * height * 2 / 8]
+//#define MJPEG_BUFFER_SIZE (288 * 240 * 2 / 8)
+//#define MJPEG_BUFFER_SIZE (320 * 240 * 2 / 8)
+//#define MJPEG_BUFFER_SIZE (128 * 128 * 2 / 8)
+#define MJPEG_BUFFER_SIZE ((VID_WIDTH * VID_HEIGHT * 2 / 8) + 256)
+
+// Multi-tasking:
 #define AUDIOASSIGNCORE 1
 #define DECODEASSIGNCORE 0
 #define DRAWASSIGNCORE 1
 
-#define SDMMC_D3 13  // SDMMC Data3 / SPI CS
-#define SDMMC_CMD 15 // SDMMC CMD   / SPI MOSI
-#define SDMMC_CLK 14 // SDMMC CLK   / SPI SCK
-// #define SDMMC_D0 2  // SDMMC Data0 / SPI MISO
-#define SDMMC_D0 4  // SDMMC Data0 / SPI MISO
+// SD Card Pins
+#define SDCS 5 //15 
+#define SDMOSI 23 //13 
+#define SDCLK 18 //14 
+#define SDMISO 19 //12 
 
-#include <WiFi.h>
-#include <FS.h>
-
-#include <FFat.h>
-#include <LittleFS.h>
-#include <SD.h>
-#include <SD_MMC.h>
-#include <SPIFFS.h>
 
 /*******************************************************************************
  * Start of Arduino_GFX setting
  ******************************************************************************/
+#define TFT_BRIGHTNESS 128
+#define GFX_BL 21 // DF_GFX_BL // default backlight pin, you may replace DF_GFX_BL to actual backlight pin
+#define TFT_DC 2
+#define TFT_CS 15
+#define TFT_SCK 14
+#define TFT_MOSI 13
+#define TFT_MISO 12
+#define TFT_RST -1 //33
+#define TFT_SPI HSPI
+
 #include <Arduino_GFX_Library.h>
-#define GFX_BL DF_GFX_BL // default backlight pin, you may replace DF_GFX_BL to actual backlight pin
-Arduino_DataBus *bus = create_default_Arduino_DataBus();
+
+//Arduino_DataBus *bus = create_default_Arduino_DataBus();
 // Arduino_GFX *gfx = new Arduino_ILI9341(bus, DF_GFX_RST, 3 /* rotation */, false /* IPS */);
-Arduino_GFX *gfx = new Arduino_ST7789(bus, DF_GFX_RST, 1 /* rotation */, true /* IPS */, 240 /* width */, 288 /* height */, 0 /* col offset 1 */, 20 /* row offset 1 */, 0 /* col offset 2 */, 12 /* row offset 2 */);
+//Arduino_GFX *gfx = new Arduino_ST7789(bus, DF_GFX_RST, 1 /* rotation */, true /* IPS */, 240 /* width */, 288 /* height */, 0 /* col offset 1 */, 20 /* row offset 1 */, 0 /* col offset 2 */, 12 /* row offset 2 */);
+
+// ESP32 SPI bus:
+Arduino_ESP32SPI *bus = new Arduino_ESP32SPI(TFT_DC /* DC */, TFT_CS /* CS */, TFT_SCK /* SCK */, TFT_MOSI /* MOSI */, TFT_MISO /* MISO */,
+  TFT_SPI /* VSPI or HSPI */, false /* Shared Bus? */);
+
+// This "DMA" bus worked, but skipped 4.1% of frame compared to 0% for the Arduino_ESP32SPI on the 24fps 320x240 video I tried...
+// Arduino_DataBus *bus = new Arduino_ESP32SPIDMA(TFT_DC /* DC */, TFT_CS /* CS */, TFT_SCK /* SCK */, TFT_MOSI /* MOSI */, TFT_MISO /* MISO */, 
+//   TFT_SPI /* VSPI or HSPI */, false /* Shared Bus? */);
+
+// ST7735 128x128 display:
+// 1.5" GREENTAB B 128x128
+// Arduino_GFX *gfx = new Arduino_ST7735(bus, TFT_RST, 
+//   0 /* rotation */, false /* IPS */, 
+//   128 /* width */, 128 /* height */, 
+//   2 /* col offset 1 */, 3 /* row offset 1 */, 
+//   2 /* col offset 2 */, 1 /* row offset 2 */);
+
+// // ILI9341 320x240 display
+// Arduino_GFX *gfx = new Arduino_ILI9341(
+//   bus, TFT_RST /* RST */, 3 /* rotation */, false /* IPS */);
+
+// // ILI9342 320x240 display on CYD
+// Arduino_GFX *gfx = new Arduino_ILI9341(
+//   bus, TFT_RST /* RST */, 1 /* rotation */, false /* IPS */);
+
+
+
+// ST7789 1.69" 280x240 rounded-corner display from Waveshare (using video size 288x240 due to MJPEG preference for sizes divisible by 16)
+// 1.69" IPS LCD ST7789
+// Arduino_GFX *gfx = new Arduino_ST7789(
+//   bus, TFT_RST /* RST */, 1 /* rotation */, true /* IPS */,
+//   240 /* width */, 280 /* height */,
+//   20 /* col offset 1 */, 20 /* row offset 1 */,
+//   0 /* col offset 2 */, 20 /* row offset 2 */);
+
+
+// ST7789 on CYD2USB
+Arduino_GFX *gfx = new Arduino_ST7789(
+  bus, TFT_RST /* RST */, 1 /* rotation */);
+
+
 /*******************************************************************************
  * End of Arduino_GFX setting
  ******************************************************************************/
@@ -49,11 +129,7 @@ static int next_frame = 0;
 static int skipped_frames = 0;
 static unsigned long start_ms, curr_ms, next_frame_ms;
 
-/* audio */
-#include "esp32_audio_task.h"
 
-/* MJPEG Video */
-#include "mjpeg_decode_draw_task.h"
 
 // pixel drawing callback
 static int drawMCU(JPEGDRAW *pDraw)
@@ -64,6 +140,39 @@ static int drawMCU(JPEGDRAW *pDraw)
   total_show_video_ms += millis() - s;
   return 1;
 } /* drawMCU() */
+
+
+void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
+    Serial.printf("Listing directory: %s\n", dirname);
+
+    File root = fs.open(dirname);
+    if(!root){
+        Serial.println("Failed to open directory");
+        return;
+    }
+    if(!root.isDirectory()){
+        Serial.println("Not a directory");
+        return;
+    }
+
+    File file = root.openNextFile();
+    while(file){
+        if(file.isDirectory()){
+            Serial.print("  DIR : ");
+            Serial.println(file.name());
+            if(levels){
+                listDir(fs, file.path(), levels -1);
+            }
+        } else {
+            Serial.print("  FILE: ");
+            Serial.print(file.name());
+            Serial.print("  SIZE: ");
+            Serial.println(file.size());
+        }
+        file = root.openNextFile();
+    }
+}
+
 
 void setup()
 {
@@ -80,32 +189,74 @@ void setup()
 
   Serial.println("Init display");
   if (!gfx->begin(80000000))
+  //if (!gfx->begin(40000000))
   {
     Serial.println("Init display failed!");
   }
-  gfx->fillScreen(BLACK);
 
+gfx->invertDisplay(false);
+
+  // draw splash screen
+  gfx->fillScreen(BLACK);
+  
 #ifdef GFX_BL
   pinMode(GFX_BL, OUTPUT);
   digitalWrite(GFX_BL, HIGH);
 #endif
 
-  Serial.println("Init I2S");
-  gfx->println("Init I2S");
-#if defined(ESP32) && (CONFIG_IDF_TARGET_ESP32)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 25 /* SCLK */, 26 /* LRCK */, 32 /* DOUT */, -1 /* DIN */);
-#elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S2)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 4 /* SCLK */, 5 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
-#elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S3)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, 42 /* MCLK */, 46 /* SCLK */, 45 /* LRCK */, 43 /* DOUT */, 44 /* DIN */);
-#elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32C3)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 10 /* SCLK */, 19 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
-#endif
-  if (ret_val != ESP_OK)
-  {
-    Serial.printf("i2s_init failed: %d\n", ret_val);
-  }
-  i2s_zero_dma_buffer(I2S_NUM_0);
+
+
+
+  
+  // // Draw rainbow gradient
+  // int32_t w, h, n, n1, cx, cy, cx1, cy1, cn, cn1;
+  // w = gfx->width();
+  // h = gfx->height();
+  // n = min(w, h);
+  // n1 = n - 1;
+  // cx = w / 2;
+  // cy = h / 2;
+  // cx1 = cx - 1;
+  // cy1 = cy - 1;
+  // cn = min(cx1, cy1);
+
+  // int16_t i, r = 360 / cn;
+
+  // for (i = 6; i < cn; i += 6)
+  // {
+  //   int hue = map(i, 0, (cn/6)), 0, 255);
+  //   uint16_t color = gfx->colorHSV(hue, 255, 255);
+  //   gfx->fillArc(cx1, cy1, i, i - 3, 0, i * r, color);
+  // }
+
+  // delay(1000);
+
+
+
+
+
+//   Serial.println("Init I2S");
+//   gfx->println("Init I2S");
+// #if defined(ESP32) && (CONFIG_IDF_TARGET_ESP32)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 25 /* SCLK */, 26 /* LRCK */, 32 /* DOUT */, -1 /* DIN */);
+// #elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S2)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 4 /* SCLK */, 5 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
+// #elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S3)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, 42 /* MCLK */, 46 /* SCLK */, 45 /* LRCK */, 43 /* DOUT */, 44 /* DIN */);
+// #elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32C3)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 10 /* SCLK */, 19 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
+// #endif
+//   if (ret_val != ESP_OK)
+//   {
+//     Serial.printf("i2s_init failed: %d\n", ret_val);
+//   }
+//   if (!(i2s_zero_dma_buffer(I2S_NUM_0) == ESP_OK)) {
+//     Serial.printf("Error clearing the I2S DMA buffer\n");
+//   }
+
+
+  // Initialize SD card / file system:
+  // ---------------------------------
 
   Serial.println("Init FS");
   gfx->println("Init FS");
@@ -113,20 +264,43 @@ void setup()
   // if (!SPIFFS.begin(false, "/root"))
   // if (!FFat.begin(false, "/root"))
 
-  SPIClass spi = SPIClass(HSPI);
-  spi.begin(SDMMC_CLK, SDMMC_D0 /* MISO */, SDMMC_CMD /* MOSI */, SDMMC_D3 /* SS */);
-  if (!SD.begin(SDMMC_D3 /* SS */, spi, 80000000))
+  bool useFiles = true;
 
-  // pinMode(SDMMC_D3 /* CS */, OUTPUT);
-  // digitalWrite(SDMMC_D3 /* CS */, HIGH);
-  // SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_D0);
-  // if (!SD_MMC.begin("/root", true)) /* 1-bit SD bus mode */
-  {
+  SPIClass sdspi = SPIClass(VSPI);    
+  sdspi.begin(SDCLK, SDMISO, SDMOSI, SDCS);
+ 
+  if (!SD.begin(SDCS /* SS */, sdspi /* SPIClass */, 80000000)) {
     Serial.println("ERROR: File system mount failed!");
     gfx->println("ERROR: File system mount failed!");
+    useFiles = false;
   }
-  else
-  {
+  else {
+    // Print information about SD card:
+    uint8_t cardType = SD.cardType();
+
+    if(cardType == CARD_NONE){
+        Serial.println("No SD card attached");
+        return;
+    }
+
+    Serial.print("SD Card Type: ");
+    if(cardType == CARD_MMC){
+        Serial.println("MMC");
+    } else if(cardType == CARD_SD){
+        Serial.println("SDSC");
+    } else if(cardType == CARD_SDHC){
+        Serial.println("SDHC");
+    } else {
+        Serial.println("UNKNOWN");
+    }
+
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("SD Card Size: %lluMB\n", cardSize);
+
+    // List files
+    listDir(SD, "/", 0);
+
+    // Check for expected files:
     bool aac_file_available = false;
     Serial.println("Open AAC file: " AAC_FILENAME);
     gfx->println("Open AAC file: " AAC_FILENAME);
@@ -154,6 +328,7 @@ void setup()
     {
       Serial.println("ERROR: Failed to open " AAC_FILENAME " or " MP3_FILENAME " file for reading");
       gfx->println("ERROR: Failed to open " AAC_FILENAME " or " MP3_FILENAME " file for reading");
+      useFiles = false;
     }
     else
     {
@@ -168,6 +343,7 @@ void setup()
       {
         Serial.println("ERROR: Failed to open " MJPEG_FILENAME " file for reading");
         gfx->println("ERROR: Failed to open " MJPEG_FILENAME " file for reading");
+        useFiles = false;
       }
       else
       {
@@ -176,22 +352,28 @@ void setup()
         mjpeg_setup(&vFile, MJPEG_BUFFER_SIZE, drawMCU,
                     false /* useBigEndian */, DECODEASSIGNCORE, DRAWASSIGNCORE);
 
-        Serial.println("Start play audio task");
-        gfx->println("Start play audio task");
-        BaseType_t ret_val;
-        if (aac_file_available)
-        {
-          ret_val = aac_player_task_start(&aFile, AUDIOASSIGNCORE);
-        }
-        else
-        {
-          ret_val = mp3_player_task_start(&aFile, AUDIOASSIGNCORE);
-        }
-        if (ret_val != pdPASS)
-        {
-          Serial.printf("Audio player task start failed: %d\n", ret_val);
-          gfx->printf("Audio player task start failed: %d\n", ret_val);
-        }
+        
+        
+        
+        // Serial.println("Start play audio task");
+        // gfx->println("Start play audio task");
+        // BaseType_t ret_val;
+        // if (aac_file_available)
+        // {
+        //   ret_val = aac_player_task_start(&aFile, AUDIOASSIGNCORE);
+        // }
+        // else
+        // {
+        //   ret_val = mp3_player_task_start(&aFile, AUDIOASSIGNCORE);
+        // }
+        // if (ret_val != pdPASS)
+        // {
+        //   Serial.printf("Audio player task start failed: %d\n", ret_val);
+        //   gfx->printf("Audio player task start failed: %d\n", ret_val);
+        // }
+
+
+
 
         Serial.println("Start play video");
         gfx->println("Start play video");
@@ -231,6 +413,10 @@ void setup()
         aFile.close();
 
         delay(200);
+
+
+        // End of video, show statistics:
+        gfx->fillScreen(BLACK);
 
         int played_frames = total_frames - skipped_frames;
         float fps = 1000.0 * played_frames / time_used;

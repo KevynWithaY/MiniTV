@@ -7,8 +7,8 @@
 
 #define AUDIO_FILENAME "/44100.aac"
 // #define MJPEG_FILENAME "/288_15fps.mjpeg"
-#define MJPEG_FILENAME "/320_15fps.mjpeg"
-#define FPS 15
+#define MJPEG_FILENAME "/320_24fps.mjpeg"
+#define FPS 24
 // #define MJPEG_BUFFER_SIZE (288 * 240 * 2 / 10)
 #define MJPEG_BUFFER_SIZE (320 * 240 * 2 / 10)
 
@@ -26,16 +26,72 @@
 #include <SD_MMC.h>
 #include <SPIFFS.h>
 
+// SD Card Pins
+#define SDCS 5 //15 
+#define SDMOSI 23 //13 
+#define SDCLK 18 //14 
+#define SDMISO 19 //12 
+
+
 /*******************************************************************************
  * Start of Arduino_GFX setting
  ******************************************************************************/
+#define TFT_BRIGHTNESS 128
+#define GFX_BL 21 // DF_GFX_BL // default backlight pin, you may replace DF_GFX_BL to actual backlight pin
+#define TFT_DC 2
+#define TFT_CS 15
+#define TFT_SCK 14
+#define TFT_MOSI 13
+#define TFT_MISO 12
+#define TFT_RST -1 //33
+#define TFT_SPI HSPI
+
 #include <Arduino_GFX_Library.h>
-#define GFX_BL DF_GFX_BL // default backlight pin, you may replace DF_GFX_BL to actual backlight pin
-/* More data bus class: https://github.com/moononournation/Arduino_GFX/wiki/Data-Bus-Class */
-Arduino_DataBus *bus = create_default_Arduino_DataBus();
-/* More display class: https://github.com/moononournation/Arduino_GFX/wiki/Display-Class */
-Arduino_GFX *gfx = new Arduino_ILI9341(bus, DF_GFX_RST, 3 /* rotation */, false /* IPS */);
-// Arduino_GFX *gfx = new Arduino_ST7789(bus, DF_GFX_RST, 1 /* rotation */, true /* IPS */, 240 /* width */, 288 /* height */, 0 /* col offset 1 */, 20 /* row offset 1 */, 0 /* col offset 2 */, 12 /* row offset 2 */);
+
+//Arduino_DataBus *bus = create_default_Arduino_DataBus();
+// Arduino_GFX *gfx = new Arduino_ILI9341(bus, DF_GFX_RST, 3 /* rotation */, false /* IPS */);
+//Arduino_GFX *gfx = new Arduino_ST7789(bus, DF_GFX_RST, 1 /* rotation */, true /* IPS */, 240 /* width */, 288 /* height */, 0 /* col offset 1 */, 20 /* row offset 1 */, 0 /* col offset 2 */, 12 /* row offset 2 */);
+
+// ESP32 SPI bus:
+Arduino_ESP32SPI *bus = new Arduino_ESP32SPI(TFT_DC /* DC */, TFT_CS /* CS */, TFT_SCK /* SCK */, TFT_MOSI /* MOSI */, TFT_MISO /* MISO */,
+  TFT_SPI /* VSPI or HSPI */, false /* Shared Bus? */);
+
+// This "DMA" bus worked, but skipped 4.1% of frame compared to 0% for the Arduino_ESP32SPI on the 24fps 320x240 video I tried...
+// Arduino_DataBus *bus = new Arduino_ESP32SPIDMA(TFT_DC /* DC */, TFT_CS /* CS */, TFT_SCK /* SCK */, TFT_MOSI /* MOSI */, TFT_MISO /* MISO */, 
+//   TFT_SPI /* VSPI or HSPI */, false /* Shared Bus? */);
+
+// ST7735 128x128 display:
+// 1.5" GREENTAB B 128x128
+// Arduino_GFX *gfx = new Arduino_ST7735(bus, TFT_RST, 
+//   0 /* rotation */, false /* IPS */, 
+//   128 /* width */, 128 /* height */, 
+//   2 /* col offset 1 */, 3 /* row offset 1 */, 
+//   2 /* col offset 2 */, 1 /* row offset 2 */);
+
+// // ILI9341 320x240 display
+// Arduino_GFX *gfx = new Arduino_ILI9341(
+//   bus, TFT_RST /* RST */, 3 /* rotation */, false /* IPS */);
+
+// // ILI9342 320x240 display on CYD
+// Arduino_GFX *gfx = new Arduino_ILI9341(
+//   bus, TFT_RST /* RST */, 1 /* rotation */, false /* IPS */);
+
+
+
+// ST7789 1.69" 280x240 rounded-corner display from Waveshare (using video size 288x240 due to MJPEG preference for sizes divisible by 16)
+// 1.69" IPS LCD ST7789
+// Arduino_GFX *gfx = new Arduino_ST7789(
+//   bus, TFT_RST /* RST */, 1 /* rotation */, true /* IPS */,
+//   240 /* width */, 280 /* height */,
+//   20 /* col offset 1 */, 20 /* row offset 1 */,
+//   0 /* col offset 2 */, 20 /* row offset 2 */);
+
+
+// ST7789 on CYD2USB
+Arduino_GFX *gfx = new Arduino_ST7789(
+  bus, TFT_RST /* RST */, 1 /* rotation */);
+
+
 /*******************************************************************************
  * End of Arduino_GFX setting
  ******************************************************************************/
@@ -90,32 +146,33 @@ void setup()
   digitalWrite(GFX_BL, HIGH);
 #endif
 
-  Serial.println("Init I2S");
-  gfx->println("Init I2S");
-#if defined(ESP32) && (CONFIG_IDF_TARGET_ESP32)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 25 /* SCLK */, 26 /* LRCK */, 32 /* DOUT */, -1 /* DIN */);
-#elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S2)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 4 /* SCLK */, 5 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
-#elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S3)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, 42 /* MCLK */, 46 /* SCLK */, 45 /* LRCK */, 43 /* DOUT */, 44 /* DIN */);
-#elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32C3)
-  esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 10 /* SCLK */, 19 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
-#endif
-  if (ret_val != ESP_OK)
-  {
-    Serial.printf("i2s_init failed: %d\n", ret_val);
-  }
-  i2s_zero_dma_buffer(I2S_NUM_0);
+//   Serial.println("Init I2S");
+//   gfx->println("Init I2S");
+// #if defined(ESP32) && (CONFIG_IDF_TARGET_ESP32)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 25 /* SCLK */, 26 /* LRCK */, 32 /* DOUT */, -1 /* DIN */);
+// #elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S2)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 4 /* SCLK */, 5 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
+// #elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32S3)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, 42 /* MCLK */, 46 /* SCLK */, 45 /* LRCK */, 43 /* DOUT */, 44 /* DIN */);
+// #elif defined(ESP32) && (CONFIG_IDF_TARGET_ESP32C3)
+//   esp_err_t ret_val = i2s_init(I2S_NUM_0, 44100, -1 /* MCLK */, 10 /* SCLK */, 19 /* LRCK */, 18 /* DOUT */, -1 /* DIN */);
+// #endif
+//   if (ret_val != ESP_OK)
+//   {
+//     Serial.printf("i2s_init failed: %d\n", ret_val);
+//   }
+//   i2s_zero_dma_buffer(I2S_NUM_0);
 
   Serial.println("Init FS");
   gfx->println("Init FS");
   // if (!LittleFS.begin(false, "/root"))
   // if (!SPIFFS.begin(false, "/root"))
-  if (!FFat.begin(false, "/root"))
+  //if (!FFat.begin(false, "/root"))
 
-  // SPIClass spi = SPIClass(HSPI);
-  // spi.begin(SDMMC_CLK, SDMMC_D0 /* MISO */, SDMMC_CMD /* MOSI */, SDMMC_D3 /* SS */);
-  // if (!SD.begin(SDMMC_D3 /* SS */, spi, 80000000))
+  SPIClass sdspi = SPIClass(VSPI);    
+  sdspi.begin(SDCLK, SDMISO, SDMOSI, SDCS);
+ 
+  if (!SD.begin(SDCS /* SS */, sdspi /* SPIClass */, 80000000)) {
 
   // pinMode(SDMMC_D3 /* CS */, OUTPUT);
   // digitalWrite(SDMMC_D3 /* CS */, HIGH);
@@ -130,8 +187,8 @@ void setup()
     gfx->println("Open audio file: " AUDIO_FILENAME);
     // File aFile = LittleFS.open(AUDIO_FILENAME);
     // File aFile = SPIFFS.open(AUDIO_FILENAME);
-    File aFile = FFat.open(AUDIO_FILENAME);
-    // File aFile = SD.open(AUDIO_FILENAME);
+    //File aFile = FFat.open(AUDIO_FILENAME);
+     File aFile = SD.open(AUDIO_FILENAME);
     // File aFile = SD_MMC.open(AUDIO_FILENAME);
     if (!aFile || aFile.isDirectory())
     {
@@ -143,8 +200,8 @@ void setup()
       gfx->println("Open video file: " MJPEG_FILENAME);
       // File vFile = LittleFS.open(MJPEG_FILENAME);
       // File vFile = SPIFFS.open(MJPEG_FILENAME);
-      File vFile = FFat.open(MJPEG_FILENAME);
-      // File vFile = SD.open(MJPEG_FILENAME);
+      //File vFile = FFat.open(MJPEG_FILENAME);
+       File vFile = SD.open(MJPEG_FILENAME);
       // File vFile = SD_MMC.open(MJPEG_FILENAME);
       if (!vFile || vFile.isDirectory())
       {
